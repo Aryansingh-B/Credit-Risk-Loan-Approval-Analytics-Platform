@@ -319,6 +319,3 @@ FROM loan_applications la JOIN credit_history ch USING (customer_id)
 WHERE la.loan_default IS NOT NULL AND ch.credit_utilization_ratio > 0.8
 ORDER BY default_rate_pct DESC;
 
--- =====================================================================
--- End of script
--- =====================================================================

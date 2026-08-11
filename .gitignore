@@ -1,0 +1,20 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Environments
+.venv/
+venv/
+env/
+
+# Generated database (rebuild with src/data_load.py)
+data/*.db
+
+# OS / editor cruft
+.DS_Store
+.vscode/
+.idea/
+
+# Streamlit
+.streamlit/

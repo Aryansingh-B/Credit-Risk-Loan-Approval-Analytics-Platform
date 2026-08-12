@@ -52,7 +52,7 @@ credit-risk-loan-analytics/
 │   ├── scored_customers.csv
 │   └── model_card.md
 ├── dashboard/
-│   └── app.py                      # Streamlit BI dashboard, all 8 required components
+│   └── app.py                      # Streamlit BI dashboard, all 8 required component
 ├── documentation/
 │   ├── PRD.docx
 │   └── data_dictionary.md

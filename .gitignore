@@ -11,7 +11,7 @@ env/
 # Generated database (rebuild with src/data_load.py)
 data/*.db
 
-# OS / editor cruft
+# OS
 .DS_Store
 .vscode/
 .idea/

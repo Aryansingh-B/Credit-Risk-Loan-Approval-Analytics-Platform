@@ -1,0 +1,88 @@
+{
+  "champion_model": "Logistic Regression",
+  "train_rows": 2722,
+  "test_rows": 681,
+  "test_default_rate": 0.2335,
+  "all_candidates": [
+    {
+      "model": "Logistic Regression",
+      "accuracy": 0.6814,
+      "precision": 0.3902,
+      "recall": 0.6478,
+      "f1": 0.487,
+      "roc_auc": 0.7044,
+      "confusion_matrix": [
+        [
+          361,
+          161
+        ],
+        [
+          56,
+          103
+        ]
+      ],
+      "cv_roc_auc_mean": 0.7218,
+      "cv_roc_auc_std": 0.0153
+    },
+    {
+      "model": "Decision Tree",
+      "accuracy": 0.6872,
+      "precision": 0.3836,
+      "recall": 0.5597,
+      "f1": 0.4552,
+      "roc_auc": 0.6589,
+      "confusion_matrix": [
+        [
+          379,
+          143
+        ],
+        [
+          70,
+          89
+        ]
+      ],
+      "cv_roc_auc_mean": 0.6664,
+      "cv_roc_auc_std": 0.0112
+    },
+    {
+      "model": "Random Forest",
+      "accuracy": 0.7327,
+      "precision": 0.4034,
+      "recall": 0.3019,
+      "f1": 0.3453,
+      "roc_auc": 0.6661,
+      "confusion_matrix": [
+        [
+          451,
+          71
+        ],
+        [
+          111,
+          48
+        ]
+      ],
+      "cv_roc_auc_mean": 0.7156,
+      "cv_roc_auc_std": 0.013
+    },
+    {
+      "model": "XGBoost",
+      "accuracy": 0.7137,
+      "precision": 0.3941,
+      "recall": 0.4214,
+      "f1": 0.4073,
+      "roc_auc": 0.6551,
+      "confusion_matrix": [
+        [
+          419,
+          103
+        ],
+        [
+          92,
+          67
+        ]
+      ],
+      "cv_roc_auc_mean": 0.6957,
+      "cv_roc_auc_std": 0.0242
+    }
+  ]
+}

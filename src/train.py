@@ -1,178 +1,324 @@
-"""
-train.py
---------
-Credora Finance | Credit Risk & Loan Approval Analytics Platform
-
-Trains and compares four classifiers on the disbursed-loan population,
-selects a champion on ROC-AUC + recall, and persists the model artefact
-plus a feature-importance table and metrics report.
-
-Usage:
-    python src/train.py
-    python src/train.py --db data/credit_risk.db --models-dir models
-"""
-
 from __future__ import annotations
 
 import argparse
 import json
 import pickle
+import time
+import warnings
 from pathlib import Path
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import sklearn
+from sklearn.base import clone
+from sklearn.calibration import calibration_curve
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
-    accuracy_score, confusion_matrix, f1_score,
-    precision_score, recall_score, roc_auc_score,
+    accuracy_score, brier_score_loss, confusion_matrix, f1_score,
+    precision_score, recall_score, roc_auc_score, roc_curve,
 )
-from sklearn.model_selection import StratifiedKFold, train_test_split
+from sklearn.model_selection import RandomizedSearchCV, StratifiedGroupKFold, cross_val_predict
+from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.tree import DecisionTreeClassifier
 from xgboost import XGBClassifier
 
-from features import build_feature_table, get_model_ready
+from calibration import PlattCalibrator, assign_category
+from explain import build_explainer, importance_table, shap_values, summary_plot
+from features import DEFAULT_DB, ROOT, TARGET, build_feature_table, get_model_ready
 
+warnings.filterwarnings("ignore")
 RANDOM_STATE = 42
+RECALL_TARGET = 0.70   # PRD section 16: recall on defaulters
+LOW_BAND_RECALL = 0.90  # Low Risk band may contain at most ~10% of true defaulters
+AUC_TARGET = 0.80       # PRD section 16
 
 
-def evaluate(name, model, X_test, y_test, needs_scaling=False, scaler=None):
-    X_eval = scaler.transform(X_test) if needs_scaling else X_test
-    proba = model.predict_proba(X_eval)[:, 1]
-    pred = (proba >= 0.5).astype(int)
-
+# --------------------------------------------------------------------------
+def candidates(pos_weight: float) -> dict:
+    """name -> (pipeline, search space, n_iter). Scaling only where it matters (linear model)."""
+    rs = RANDOM_STATE
     return {
-        "model": name,
-        "accuracy": round(accuracy_score(y_test, pred), 4),
-        "precision": round(precision_score(y_test, pred, zero_division=0), 4),
-        "recall": round(recall_score(y_test, pred, zero_division=0), 4),
-        "f1": round(f1_score(y_test, pred, zero_division=0), 4),
-        "roc_auc": round(roc_auc_score(y_test, proba), 4),
-        "confusion_matrix": confusion_matrix(y_test, pred).tolist(),
+        "Logistic Regression": (
+            Pipeline([("scaler", StandardScaler()),
+                      ("clf", LogisticRegression(max_iter=2000, class_weight="balanced", random_state=rs))]),
+            {"clf__C": [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1, 3]}, 8),
+        "Decision Tree": (
+            Pipeline([("scaler", "passthrough"),
+                      ("clf", DecisionTreeClassifier(class_weight="balanced", random_state=rs))]),
+            {"clf__max_depth": [3, 4, 5, 6, 8], "clf__min_samples_leaf": [10, 20, 40, 80],
+             "clf__criterion": ["gini", "entropy"]}, 10),
+        "Random Forest": (
+            Pipeline([("scaler", "passthrough"),
+                      ("clf", RandomForestClassifier(class_weight="balanced_subsample", random_state=rs, n_jobs=-1))]),
+            {"clf__n_estimators": [200, 300], "clf__max_depth": [4, 6, 8, 12],
+             "clf__min_samples_leaf": [5, 10, 20], "clf__max_features": ["sqrt", 0.3]}, 8),
+        "XGBoost": (
+            Pipeline([("scaler", "passthrough"),
+                      ("clf", XGBClassifier(scale_pos_weight=pos_weight, eval_metric="logloss",
+                                            random_state=rs, n_jobs=-1))]),
+            {"clf__n_estimators": [150, 300], "clf__max_depth": [2, 3, 4, 5],
+             "clf__learning_rate": [0.02, 0.05, 0.1], "clf__subsample": [0.7, 0.9],
+             "clf__colsample_bytree": [0.6, 0.8, 1.0], "clf__min_child_weight": [1, 5, 10],
+             "clf__reg_lambda": [1, 5, 10]}, 10),
     }
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Train and evaluate the loan-default classifiers.")
-    parser.add_argument("--db", default="data/credit_risk.db")
-    parser.add_argument("--models-dir", default="models")
-    args = parser.parse_args()
+def metrics_at(y, proba, thr: float) -> dict:
+    pred = (np.asarray(proba) >= thr).astype(int)
+    return {
+        "threshold": round(float(thr), 4),
+        "accuracy": round(accuracy_score(y, pred), 4),
+        "precision": round(precision_score(y, pred, zero_division=0), 4),
+        "recall": round(recall_score(y, pred, zero_division=0), 4),
+        "f1": round(f1_score(y, pred, zero_division=0), 4),
+        "roc_auc": round(roc_auc_score(y, proba), 4),
+        "confusion_matrix": confusion_matrix(y, pred).tolist(),
+    }
 
-    models_dir = Path(args.models_dir)
-    models_dir.mkdir(parents=True, exist_ok=True)
+
+def pick_thresholds(y, p) -> tuple:
+    """Return (t_low, t_op) from out-of-fold calibrated probabilities."""
+    y = np.asarray(y)
+    grid = np.round(np.arange(0.02, 0.95, 0.005), 3)
+    rec = np.array([(p[y == 1] >= t).mean() for t in grid])  # non-increasing in t
+    t_op = float(grid[rec >= RECALL_TARGET].max())
+    t_low = float(grid[rec >= LOW_BAND_RECALL].max())
+    return min(t_low, t_op - 0.02), t_op
+
+
+def _json_default(o):
+    """json.dumps fallback: numpy scalars/arrays (np.bool_, np.float64, ...) -> plain Python."""
+    if hasattr(o, "tolist"):
+        return o.tolist()
+    raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
+
+
+def wilson_ci(successes: int, n: int, z: float = 1.96) -> tuple:
+    """95% Wilson interval for a proportion (used for recall: successes = caught defaulters)."""
+    if n == 0:
+        return (0.0, 0.0)
+    p = successes / n
+    d = 1 + z * z / n
+    centre = (p + z * z / (2 * n)) / d
+    half = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
+    return (round(float(centre - half), 4), round(float(centre + half), 4))
+
+
+def band_validation(y, p, low_below: int, high_from: int) -> list:
+    scores = np.round(np.asarray(p) * 100).astype(int)
+    cats = assign_category(scores, low_below, high_from)
+    out = []
+    for c in ["Low Risk", "Medium Risk", "High Risk"]:
+        m = cats == c
+        out.append({"band": c, "loans": int(m.sum()),
+                    "share_of_loans": round(float(m.mean()), 4),
+                    "observed_default_rate": round(float(np.asarray(y)[m].mean()), 4) if m.any() else None})
+    return out
+
+
+# --------------------------------------------------------------------------
+def main() -> None:
+    ap = argparse.ArgumentParser(description="Tune, compare, calibrate and persist the default model.")
+    ap.add_argument("--db", default=DEFAULT_DB)
+    ap.add_argument("--models-dir", default=str(ROOT / "models"))
+    ap.add_argument("--reports-dir", default=str(ROOT / "reports"))
+    args = ap.parse_args()
+
+    t0 = time.time()
+    models_dir, reports_dir = Path(args.models_dir), Path(args.reports_dir)
+    fig_dir = reports_dir / "figures"
+    for d in (models_dir, fig_dir):
+        d.mkdir(parents=True, exist_ok=True)
 
     print("Loading and engineering features...")
     raw = build_feature_table(args.db)
     model_df = get_model_ready(raw)
-
-    y = model_df["loan_default"].astype(int)
-    X = model_df.drop(columns=["loan_default"])
+    y = model_df[TARGET].astype(int)
+    X = model_df.drop(columns=[TARGET])
+    groups = raw.loc[X.index, "customer_id"]
     feature_names = X.columns.tolist()
 
-    # 80/20 stratified split -- touched once, at the end (PRD 13.4)
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.20, stratify=y, random_state=RANDOM_STATE
-    )
-    print(f"Train: {len(X_train):,} rows | Test: {len(X_test):,} rows | "
-          f"Train default rate: {y_train.mean():.1%} | Test default rate: {y_test.mean():.1%}")
+    # 80/20 stratified split, grouped by customer (first fold of a 5-fold grouped split)
+    splitter = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
+    tr, te = next(splitter.split(X, y, groups))
+    X_tr, X_te, y_tr, y_te, g_tr = X.iloc[tr], X.iloc[te], y.iloc[tr], y.iloc[te], groups.iloc[tr]
+    assert not set(groups.iloc[tr]) & set(groups.iloc[te]), "customer leaked across train/test"
+    print(f"Train: {len(X_tr):,} loans / {g_tr.nunique():,} customers | Test: {len(X_te):,} loans / "
+          f"{groups.iloc[te].nunique():,} customers | default rate train {y_tr.mean():.1%} test {y_te.mean():.1%}")
+    print("Customers shared between train and test: 0")
 
-    scaler = StandardScaler().fit(X_train)
-    X_train_scaled = scaler.transform(X_train)
+    cv = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
+    pos_weight = float((y_tr == 0).sum() / (y_tr == 1).sum())
 
-    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
+    # ---- tune every candidate on the training set only ----
+    results, fitted = [], {}
+    print("\nTuning (RandomizedSearchCV, 5-fold grouped CV, scoring=roc_auc)...")
+    for name, (pipe, space, n_iter) in candidates(pos_weight).items():
+        s = time.time()
+        n_iter = min(n_iter, int(np.prod([len(v) for v in space.values()])))
+        search = RandomizedSearchCV(pipe, space, n_iter=n_iter, scoring="roc_auc", cv=cv,
+                                    random_state=RANDOM_STATE, n_jobs=1, refit=True)
+        search.fit(X_tr, y_tr, groups=g_tr)
+        fitted[name] = search.best_estimator_
+        test_raw = search.best_estimator_.predict_proba(X_te)[:, 1]
+        m = metrics_at(y_te, test_raw, 0.5)
+        m.update({"model": name,
+                  "cv_roc_auc_mean": round(float(search.best_score_), 4),
+                  "cv_roc_auc_std": round(float(search.cv_results_["std_test_score"][search.best_index_]), 4),
+                  "best_params": {k.replace("clf__", ""): (v.item() if hasattr(v, "item") else v)
+                                  for k, v in search.best_params_.items()},
+                  "search_seconds": round(time.time() - s, 1)})
+        results.append(m)
+        print(f"  {name:<20} CV AUC {m['cv_roc_auc_mean']:.3f}+/-{m['cv_roc_auc_std']:.3f} | "
+              f"test AUC {m['roc_auc']:.3f} @0.5 recall {m['recall']:.3f} | {m['search_seconds']}s")
 
-    candidates = {
-        "Logistic Regression": (
-            LogisticRegression(max_iter=1000, class_weight="balanced", random_state=RANDOM_STATE),
-            True,
-        ),
-        "Decision Tree": (
-            DecisionTreeClassifier(max_depth=6, class_weight="balanced", random_state=RANDOM_STATE),
-            False,
-        ),
-        "Random Forest": (
-            RandomForestClassifier(
-                n_estimators=300, max_depth=10, class_weight="balanced",
-                random_state=RANDOM_STATE, n_jobs=-1,
-            ),
-            False,
-        ),
-        "XGBoost": (
-            XGBClassifier(
-                n_estimators=300, max_depth=5, learning_rate=0.05,
-                scale_pos_weight=(y_train == 0).sum() / (y_train == 1).sum(),
-                eval_metric="logloss", random_state=RANDOM_STATE, n_jobs=-1,
-            ),
-            False,
-        ),
+    # ---- champion: highest cross-validated ROC-AUC (test set NOT used) ----
+    champion = max(results, key=lambda r: r["cv_roc_auc_mean"])["model"]
+    base = fitted[champion]
+    print(f"\nChampion (by CV ROC-AUC): {champion}")
+
+    # ---- calibration + thresholds from OUT-OF-FOLD training predictions ----
+    oof_raw = cross_val_predict(clone(base), X_tr, y_tr, cv=cv, groups=g_tr, method="predict_proba")[:, 1]
+    calibrator = PlattCalibrator().fit(oof_raw, y_tr)
+    oof_cal = calibrator.predict(oof_raw)
+    t_low, t_op = pick_thresholds(y_tr, oof_cal)
+    low_below, high_from = int(round(t_low * 100)), int(round(t_op * 100))
+    print(f"Operating threshold (recall >= {RECALL_TARGET:.2f} on OOF): {t_op:.3f} | "
+          f"Low-risk cut: {t_low:.3f} -> bands: Low <{low_below}, Medium {low_below}-{high_from - 1}, High >={high_from}")
+
+    # ---- single evaluation on the held-out test set ----
+    p_raw = base.predict_proba(X_te)[:, 1]
+    p_cal = calibrator.predict(p_raw)
+    at_default = metrics_at(y_te, p_raw, 0.5)
+    at_operating = metrics_at(y_te, p_cal, t_op)
+    calib = {
+        "mean_predicted_raw": round(float(p_raw.mean()), 4),
+        "mean_predicted_calibrated": round(float(p_cal.mean()), 4),
+        "actual_default_rate": round(float(y_te.mean()), 4),
+        "brier_raw": round(brier_score_loss(y_te, p_raw), 4),
+        "brier_calibrated": round(brier_score_loss(y_te, p_cal), 4),
     }
+    bands_test = band_validation(y_te, p_cal, low_below, high_from)
+    thr_table = [dict(metrics_at(y_te, p_cal, t), flagged_share=round(float((p_cal >= t).mean()), 4))
+                 for t in np.round(np.arange(0.10, 0.61, 0.05), 2)]
+    for r in thr_table:
+        r.pop("confusion_matrix"); r.pop("accuracy"); r.pop("roc_auc")
+    pd.DataFrame(thr_table).to_csv(reports_dir / "threshold_analysis.csv", index=False)
 
-    results = []
-    fitted_models = {}
-    print("\nTraining and 5-fold cross-validating each candidate...")
-    for name, (model, needs_scaling) in candidates.items():
-        fit_X = X_train_scaled if needs_scaling else X_train
-        cv_scores = []
-        for tr_idx, val_idx in cv.split(fit_X, y_train):
-            fold_X_tr = fit_X[tr_idx] if needs_scaling else fit_X.iloc[tr_idx]
-            fold_X_val = fit_X[val_idx] if needs_scaling else fit_X.iloc[val_idx]
-            fold_model = type(model)(**model.get_params())
-            fold_model.fit(fold_X_tr, y_train.iloc[tr_idx])
-            proba = fold_model.predict_proba(fold_X_val)[:, 1]
-            cv_scores.append(roc_auc_score(y_train.iloc[val_idx], proba))
+    print(f"\nHeld-out test ({len(y_te)} loans):")
+    print(f"  ROC-AUC {at_default['roc_auc']:.3f}  | @0.50 raw: recall {at_default['recall']:.3f} precision {at_default['precision']:.3f}")
+    print(f"  @{t_op:.3f} calibrated: recall {at_operating['recall']:.3f} precision {at_operating['precision']:.3f} F1 {at_operating['f1']:.3f}")
+    print(f"  mean predicted P(default): raw {calib['mean_predicted_raw']:.3f} -> calibrated {calib['mean_predicted_calibrated']:.3f} (actual {calib['actual_default_rate']:.3f})")
+    for b in bands_test:
+        print(f"  {b['band']:<12} {b['loans']:>4} loans  observed default rate {b['observed_default_rate']:.1%}")
 
-        model.fit(fit_X, y_train)
-        fitted_models[name] = (model, needs_scaling)
+    # ---- SHAP (global) ----
+    bg = X_tr.sample(n=min(100, len(X_tr)), random_state=RANDOM_STATE)
+    explainer = build_explainer(base, bg)
+    sv_te = shap_values(explainer, base, X_te)
+    imp = importance_table(sv_te, feature_names)
+    imp.to_csv(models_dir / "feature_importance.csv", index=False)
+    summary_plot(sv_te, X_te, str(fig_dir / "shap_summary.png"))
 
-        metrics = evaluate(name, model, X_test, y_test, needs_scaling, scaler)
-        metrics["cv_roc_auc_mean"] = round(float(np.mean(cv_scores)), 4)
-        metrics["cv_roc_auc_std"] = round(float(np.std(cv_scores)), 4)
-        results.append(metrics)
-        print(f"  {name:<22} ROC-AUC(test)={metrics['roc_auc']:.3f}  "
-              f"CV ROC-AUC={metrics['cv_roc_auc_mean']:.3f}±{metrics['cv_roc_auc_std']:.3f}  "
-              f"Recall={metrics['recall']:.3f}")
+    # ---- out-of-fold probability for EVERY disbursed loan (honest per-loan scores) ----
+    full_cv = StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
+    oof_all = calibrator.predict(
+        cross_val_predict(clone(base), X, y, cv=full_cv, groups=groups, method="predict_proba")[:, 1])
+    pd.DataFrame({
+        "application_id": raw.loc[X.index, "application_id"].values,
+        "customer_id": groups.values,
+        "loan_default": y.values,
+        "default_probability": np.round(oof_all, 4),
+    }).to_csv(models_dir / "oof_predictions.csv", index=False)
 
-    # Champion selection: primary = ROC-AUC, tiebreak = recall (PRD 13.5)
-    results_sorted = sorted(results, key=lambda r: (r["roc_auc"], r["recall"]), reverse=True)
-    champion_name = results_sorted[0]["model"]
-    champion_model, champion_needs_scaling = fitted_models[champion_name]
-    print(f"\nChampion model: {champion_name} "
-          f"(ROC-AUC={results_sorted[0]['roc_auc']:.3f}, Recall={results_sorted[0]['recall']:.3f})")
+    # ---- plots ----
+    plt.figure(figsize=(5.5, 4.5))
+    for name, est in fitted.items():
+        fpr, tpr, _ = roc_curve(y_te, est.predict_proba(X_te)[:, 1])
+        plt.plot(fpr, tpr, label=f"{name} (AUC {roc_auc_score(y_te, est.predict_proba(X_te)[:, 1]):.2f})")
+    plt.plot([0, 1], [0, 1], "k--", lw=0.8)
+    plt.xlabel("False positive rate"); plt.ylabel("True positive rate"); plt.title("ROC curves (held-out test)")
+    plt.legend(fontsize=8); plt.tight_layout(); plt.savefig(fig_dir / "roc_curves.png", dpi=130); plt.close()
 
-    # Feature importance (tree-based) or coefficients (linear)
-    if hasattr(champion_model, "feature_importances_"):
-        importance = pd.Series(champion_model.feature_importances_, index=feature_names)
-    else:
-        importance = pd.Series(np.abs(champion_model.coef_[0]), index=feature_names)
-    importance = importance.sort_values(ascending=False)
-    importance.to_csv(models_dir / "feature_importance.csv", header=["importance"])
+    plt.figure(figsize=(5, 4.5))
+    for lbl, pp in (("raw (balanced weights)", p_raw), ("calibrated", p_cal)):
+        fo, mp = calibration_curve(y_te, pp, n_bins=8, strategy="quantile")
+        plt.plot(mp, fo, marker="o", label=lbl)
+    plt.plot([0, 1], [0, 1], "k--", lw=0.8)
+    plt.xlabel("Mean predicted probability"); plt.ylabel("Observed default rate")
+    plt.title("Calibration (held-out test)"); plt.legend(fontsize=8); plt.tight_layout()
+    plt.savefig(fig_dir / "calibration.png", dpi=130); plt.close()
 
-    # Persist champion model + preprocessing artefacts
+    cm = np.array(at_operating["confusion_matrix"])
+    plt.figure(figsize=(4.4, 4))
+    plt.imshow(cm, cmap="Blues")
+    for i in range(2):
+        for j in range(2):
+            plt.text(j, i, f"{cm[i, j]}", ha="center", va="center", fontsize=14,
+                     color="white" if cm[i, j] > cm.max() / 2 else "black")
+    plt.xticks([0, 1], ["No default", "Default"]); plt.yticks([0, 1], ["No default", "Default"])
+    plt.xlabel("Predicted"); plt.ylabel("Actual")
+    plt.title(f"Confusion matrix @ threshold {t_op:.2f}"); plt.tight_layout()
+    plt.savefig(fig_dir / "confusion_matrix.png", dpi=130); plt.close()
+
+    tt = pd.DataFrame(thr_table)
+    plt.figure(figsize=(5.5, 4))
+    plt.plot(tt["threshold"], tt["recall"], marker="o", label="recall")
+    plt.plot(tt["threshold"], tt["precision"], marker="o", label="precision")
+    plt.axhline(RECALL_TARGET, color="red", ls="--", lw=0.8, label="PRD recall target")
+    plt.axvline(t_op, color="grey", ls=":", lw=0.8)
+    plt.xlabel("Decision threshold (calibrated P)"); plt.title("Recall / precision trade-off")
+    plt.legend(fontsize=8); plt.tight_layout(); plt.savefig(fig_dir / "threshold_tradeoff.png", dpi=130); plt.close()
+
+    # ---- persist ----
+    train_seconds = round(time.time() - t0, 1)
+    bands = {"low_below": low_below, "high_from": high_from, "operating_threshold": round(t_op, 4),
+             "low_cut_threshold": round(t_low, 4),
+             "rule": "score = round(P x 100); Low < low_below <= Medium < high_from <= High"}
+    (models_dir / "risk_bands.json").write_text(json.dumps(bands, indent=2, default=_json_default))
     with open(models_dir / "default_model.pkl", "wb") as f:
         pickle.dump({
-            "model": champion_model,
-            "model_name": champion_name,
-            "needs_scaling": champion_needs_scaling,
-            "scaler": scaler if champion_needs_scaling else None,
-            "feature_names": feature_names,
-            "random_state": RANDOM_STATE,
+            "model": base, "calibrator": calibrator, "model_name": champion,
+            "feature_names": feature_names, "medians": X_tr.median(), "background": bg,
+            "bands": bands, "random_state": RANDOM_STATE,
+            "sklearn_version": sklearn.__version__,
         }, f)
 
-    with open(models_dir / "metrics_report.json", "w") as f:
-        json.dump({
-            "champion_model": champion_name,
-            "train_rows": len(X_train),
-            "test_rows": len(X_test),
-            "test_default_rate": round(float(y_test.mean()), 4),
-            "all_candidates": results,
-        }, f, indent=2)
+    tp = int(at_operating["confusion_matrix"][1][1]); n_pos = int(sum(at_operating["confusion_matrix"][1]))
+    recall_ci = wilson_ci(tp, n_pos)
+    scorecard = {
+        "roc_auc_target": AUC_TARGET, "roc_auc_achieved": at_default["roc_auc"],
+        "roc_auc_met": bool(at_default["roc_auc"] >= AUC_TARGET),
+        "recall_target": RECALL_TARGET, "recall_at_operating_threshold": at_operating["recall"],
+        "recall_met": bool(at_operating["recall"] >= RECALL_TARGET),
+        "recall_ci95_at_operating_threshold": list(recall_ci),
+        "recall_target_inside_ci95": bool(recall_ci[0] <= RECALL_TARGET <= recall_ci[1]),
+        "test_defaulters": n_pos,
+        "recall_at_default_0.5": at_default["recall"],
+        "training_under_5_min": train_seconds < 300, "training_seconds": train_seconds,
+    }
+    (models_dir / "metrics_report.json").write_text(json.dumps({
+        "champion_model": champion,
+        "selection_rule": "highest 5-fold grouped-CV ROC-AUC on the training set; test set not used for selection",
+        "split": {"train_loans": len(X_tr), "test_loans": len(X_te),
+                  "train_customers": int(g_tr.nunique()), "test_customers": int(groups.iloc[te].nunique()),
+                  "customers_shared": 0, "test_default_rate": round(float(y_te.mean()), 4)},
+        "n_features": len(feature_names),
+        "champion_test_at_0.5_raw": at_default,
+        "champion_test_at_operating_threshold": at_operating,
+        "calibration": calib, "band_validation_test": bands_test, "bands": bands,
+        "success_scorecard": scorecard,
+        "all_candidates": results,
+    }, indent=2, default=_json_default))
 
-    print(f"\nSaved: {models_dir / 'default_model.pkl'}")
-    print(f"Saved: {models_dir / 'feature_importance.csv'}")
-    print(f"Saved: {models_dir / 'metrics_report.json'}")
-    print(f"\nTop 10 feature importances ({champion_name}):")
-    print(importance.head(10).to_string())
+    print(f"\nSaved model, calibrator, bands, SHAP importance, OOF predictions and 5 figures ({train_seconds}s total)")
+    print("Top 8 drivers (mean |SHAP|):")
+    print(imp.head(8).to_string(index=False))
 
 
 if __name__ == "__main__":

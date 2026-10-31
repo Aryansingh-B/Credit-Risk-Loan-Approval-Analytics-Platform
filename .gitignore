@@ -1,20 +1,21 @@
-# Byte-compiled / cache.
+# Python
 __pycache__/
 *.py[cod]
 .ipynb_checkpoints/
 
-# Environmentss
+# Virtual environments
 .venv/
 venv/
 env/
 
-# Generated database (rebuild with src/data_load.py)
+# Generated database (rebuild with: python src/data_load.py)
 data/*.db
 
-# OS
+# Test / tool caches
+.pytest_cache/
+.streamlit/
+
+# OS / editor
 .DS_Store
 .vscode/
 .idea/
-
-# Streamlit
-.streamlit/

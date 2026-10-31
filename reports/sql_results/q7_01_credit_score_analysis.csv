@@ -1,0 +1,6 @@
+credit_band,customers,avg_score,avg_utilization,avg_late_30d
+Excellent (750-900),571,787.0,0.27,0.39
+Good (700-749),822,722.0,0.319,0.38
+Fair (650-699),1164,674.0,0.349,0.43
+Poor (580-649),1440,618.0,0.393,2.22
+Very Poor (300-579),1003,526.0,0.45,2.22

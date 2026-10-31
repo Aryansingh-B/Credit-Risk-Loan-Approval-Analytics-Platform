@@ -1,0 +1,7 @@
+loan_type,disbursed_loans,defaults,default_rate_pct,avg_interest_rate
+Home,326,103,31.6,9.2
+Business,290,86,29.66,15.95
+Education,336,92,27.38,10.96
+Gold,386,90,23.32,12.05
+Auto,670,143,21.34,11.51
+Personal,1395,283,20.29,17.53

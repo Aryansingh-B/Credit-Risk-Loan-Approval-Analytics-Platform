@@ -1,0 +1,4 @@
+risk_category,customers,avg_score
+Low Risk,992,751.0
+Medium Risk,2268,674.0
+High Risk,1740,558.0

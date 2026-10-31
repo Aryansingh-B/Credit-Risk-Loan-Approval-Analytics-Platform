@@ -1,0 +1,15 @@
+employment_type,income_band,customers,avg_credit_score,approval_rate_pct
+Business Owner,Entry (<6L),293,623.0,28.5
+Business Owner,High (15L+),51,771.0,69.4
+Business Owner,Mid (6-15L),285,691.0,57.7
+Retired,Entry (<6L),306,596.0,22.2
+Retired,High (15L+),3,720.0,83.3
+Retired,Mid (6-15L),43,693.0,51.3
+Salaried,Entry (<6L),1743,641.0,34.5
+Salaried,High (15L+),93,786.0,78.8
+Salaried,Mid (6-15L),871,718.0,58.6
+Self-Employed,Entry (<6L),619,606.0,28.8
+Self-Employed,High (15L+),45,744.0,64.0
+Self-Employed,Mid (6-15L),376,682.0,54.3
+Unemployed,Entry (<6L),271,495.0,4.8
+Unemployed,Mid (6-15L),1,576.0,33.3

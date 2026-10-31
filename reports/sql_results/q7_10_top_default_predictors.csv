@@ -1,0 +1,5 @@
+driver,default_rate_pct,n
+credit_score<600,40.11,379
+utilization>0.8,33.33,36
+prior_default>=1,33.1,142
+dti>0.5,28.5,2340

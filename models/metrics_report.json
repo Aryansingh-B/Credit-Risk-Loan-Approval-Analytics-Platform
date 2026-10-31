@@ -1,0 +1,213 @@
+{
+  "champion_model": "Logistic Regression",
+  "selection_rule": "highest 5-fold grouped-CV ROC-AUC on the training set; test set not used for selection",
+  "split": {
+    "train_loans": 2708,
+    "test_loans": 695,
+    "train_customers": 1839,
+    "test_customers": 470,
+    "customers_shared": 0,
+    "test_default_rate": 0.2187
+  },
+  "n_features": 48,
+  "champion_test_at_0.5_raw": {
+    "threshold": 0.5,
+    "accuracy": 0.6806,
+    "precision": 0.3589,
+    "recall": 0.5855,
+    "f1": 0.445,
+    "roc_auc": 0.7248,
+    "confusion_matrix": [
+      [
+        384,
+        159
+      ],
+      [
+        63,
+        89
+      ]
+    ]
+  },
+  "champion_test_at_operating_threshold": {
+    "threshold": 0.225,
+    "accuracy": 0.6662,
+    "precision": 0.3582,
+    "recall": 0.6645,
+    "f1": 0.4654,
+    "roc_auc": 0.7248,
+    "confusion_matrix": [
+      [
+        362,
+        181
+      ],
+      [
+        51,
+        101
+      ]
+    ]
+  },
+  "calibration": {
+    "mean_predicted_raw": 0.4478,
+    "mean_predicted_calibrated": 0.2252,
+    "actual_default_rate": 0.2187,
+    "brier_raw": 0.2067,
+    "brier_calibrated": 0.1552
+  },
+  "band_validation_test": [
+    {
+      "band": "Low Risk",
+      "loans": 201,
+      "share_of_loans": 0.2892,
+      "observed_default_rate": 0.0647
+    },
+    {
+      "band": "Medium Risk",
+      "loans": 195,
+      "share_of_loans": 0.2806,
+      "observed_default_rate": 0.1846
+    },
+    {
+      "band": "High Risk",
+      "loans": 299,
+      "share_of_loans": 0.4302,
+      "observed_default_rate": 0.3445
+    }
+  ],
+  "bands": {
+    "low_below": 14,
+    "high_from": 22,
+    "operating_threshold": 0.225,
+    "low_cut_threshold": 0.145,
+    "rule": "score = round(P x 100); Low < low_below <= Medium < high_from <= High"
+  },
+  "success_scorecard": {
+    "roc_auc_target": 0.8,
+    "roc_auc_achieved": 0.7248,
+    "roc_auc_met": false,
+    "recall_target": 0.7,
+    "recall_at_operating_threshold": 0.6645,
+    "recall_met": false,
+    "recall_ci95_at_operating_threshold": [
+      0.5862,
+      0.7347
+    ],
+    "recall_target_inside_ci95": true,
+    "test_defaulters": 152,
+    "recall_at_default_0.5": 0.5855,
+    "training_under_5_min": true,
+    "training_seconds": 95.9
+  },
+  "all_candidates": [
+    {
+      "threshold": 0.5,
+      "accuracy": 0.6806,
+      "precision": 0.3589,
+      "recall": 0.5855,
+      "f1": 0.445,
+      "roc_auc": 0.7248,
+      "confusion_matrix": [
+        [
+          384,
+          159
+        ],
+        [
+          63,
+          89
+        ]
+      ],
+      "model": "Logistic Regression",
+      "cv_roc_auc_mean": 0.7299,
+      "cv_roc_auc_std": 0.0201,
+      "best_params": {
+        "C": 0.003
+      },
+      "search_seconds": 1.7
+    },
+    {
+      "threshold": 0.5,
+      "accuracy": 0.6604,
+      "precision": 0.3521,
+      "recall": 0.6579,
+      "f1": 0.4587,
+      "roc_auc": 0.6982,
+      "confusion_matrix": [
+        [
+          359,
+          184
+        ],
+        [
+          52,
+          100
+        ]
+      ],
+      "model": "Decision Tree",
+      "cv_roc_auc_mean": 0.7019,
+      "cv_roc_auc_std": 0.0287,
+      "best_params": {
+        "min_samples_leaf": 80,
+        "max_depth": 4,
+        "criterion": "entropy"
+      },
+      "search_seconds": 4.2
+    },
+    {
+      "threshold": 0.5,
+      "accuracy": 0.7094,
+      "precision": 0.3821,
+      "recall": 0.5329,
+      "f1": 0.4451,
+      "roc_auc": 0.7082,
+      "confusion_matrix": [
+        [
+          412,
+          131
+        ],
+        [
+          71,
+          81
+        ]
+      ],
+      "model": "Random Forest",
+      "cv_roc_auc_mean": 0.7157,
+      "cv_roc_auc_std": 0.0284,
+      "best_params": {
+        "n_estimators": 200,
+        "min_samples_leaf": 20,
+        "max_features": "sqrt",
+        "max_depth": 12
+      },
+      "search_seconds": 58.8
+    },
+    {
+      "threshold": 0.5,
+      "accuracy": 0.6532,
+      "precision": 0.337,
+      "recall": 0.6053,
+      "f1": 0.4329,
+      "roc_auc": 0.7086,
+      "confusion_matrix": [
+        [
+          362,
+          181
+        ],
+        [
+          60,
+          92
+        ]
+      ],
+      "model": "XGBoost",
+      "cv_roc_auc_mean": 0.7226,
+      "cv_roc_auc_std": 0.027,
+      "best_params": {
+        "subsample": 0.7,
+        "reg_lambda": 10,
+        "n_estimators": 300,
+        "min_child_weight": 10,
+        "max_depth": 2,
+        "learning_rate": 0.02,
+        "colsample_bytree": 0.8
+      },
+      "search_seconds": 26.0
+    }
+  ]
+}

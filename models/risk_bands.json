@@ -1,0 +1,7 @@
+{
+  "low_below": 14,
+  "high_from": 22,
+  "operating_threshold": 0.225,
+  "low_cut_threshold": 0.145,
+  "rule": "score = round(P x 100); Low < low_below <= Medium < high_from <= High"
+}

@@ -1,116 +1,171 @@
-# Credora Finance — Credit Risk & Loan Approval Analytics Platform
+# Credora Finance | Credit Risk & Loan Approval Analytics Platform
 
-An end-to-end decision-support system for retail lending: a governed relational database,
-a loan-default prediction model, a 0–100 risk-scoring engine, and a BI dashboard — built on
-a book of ~5,000 customers and ~7,500 loan applications.
+> **Turning Lending Data into Risk Intelligence**
+>
+> An end-to-end credit risk analytics platform built using **Python, SQL, Machine Learning, and Streamlit** to support loan approval and default-risk assessment. The platform integrates **5,000 customers, 7,500 loan applications, and 40,079 transactions**, delivering a 0–100 customer risk score and an interactive dashboard. The champion Logistic Regression model achieved **0.704 ROC-AUC** and **0.648 recall** on held-out test data.
 
-> Built for the Internmo Applied Data Science internship track (project code `CRDA-RISK-2024`).
-> Full requirements: [`documentation/PRD.docx`](documentation/PRD.docx).
+![Python](https://img.shields.io/badge/Python-3.10+-blue)
+![SQL](https://img.shields.io/badge/SQL-PostgreSQL%20%7C%20SQLite-336791)
+![Machine Learning](https://img.shields.io/badge/ML-Scikit--learn-orange)
+![Dashboard](https://img.shields.io/badge/Dashboard-Streamlit-red)
+![Status](https://img.shields.io/badge/Project-Complete-brightgreen)
 
-## What this does
+**Quick Links:** [Dashboard](#dashboard-preview) · [Dataset](#dataset-overview) · [Key Findings](#key-insights--findings)
 
-Every loan application reaches underwriting with two open questions: *should this be
-approved*, and *if disbursed, how likely is this borrower to default?* This project answers
-both by unifying customer, bureau, application and transaction data into one schema, training
-a default classifier on the disbursed book, converting its output into a business-facing risk
-score, and surfacing everything on an interactive dashboard — without replacing the
-underwriter's final call.
+---
 
-## Results at a glance
+## 1. Business Problem
 
-- **Data foundation:** 5,000 customers · 5,000 bureau records · 7,500 applications · 40,079
-  transactions loaded with **0 orphan foreign keys**.
-- **Champion model:** Logistic Regression — **ROC-AUC 0.704**, recall 0.648 on a held-out
-  test set (see [`models/model_card.md`](models/model_card.md) for the full comparison
-  against Decision Tree, Random Forest and XGBoost, and an honest discussion of why this
-  falls short of the PRD's 0.80 stretch target).
-- **Risk scoring:** every customer with an application gets a 0–100 score and a
-  Low / Medium / High band (`models/scored_customers.csv`).
-- **10 analytical SQL queries** and an **8-component BI dashboard**, both runnable end to end.
+Financial institutions must assess whether a loan applicant is suitable for approval and how likely an approved borrower is to default.
 
-## Project structure
+Fragmented customer, credit bureau, loan application, and transaction data can make risk assessment difficult. Poor lending decisions may increase defaults and financial losses, while overly restrictive approvals can limit lending opportunities.
 
-```
+**Business goal:** Build a data-driven decision-support platform that consolidates lending data, predicts default risk, and helps underwriters prioritize applications for review.
+
+## 2. Dataset Overview & Data Dictionary
+
+The project uses a **synthetic retail lending dataset** representing a fictional finance business.
+
+| Dataset | Records | Business Purpose |
+|---|---:|---|
+| Customers | 5,000 | Customer profile information |
+| Credit History | 5,000 | Credit bureau information |
+| Loan Applications | 7,500 | Loan application details |
+| Transactions | 40,079 | Customer financial activity |
+
+**Total:** 57,579 records across four datasets.
+
+### Key Data Fields
+
+| Field / Feature | Data Type | Business Definition |
+|---|---|---|
+| Customer ID | Integer | Unique customer identifier |
+| Credit History | Structured | Customer credit bureau information |
+| Loan Application | Structured | Loan request and application details |
+| Transactions | Numeric / Date | Customer financial transaction activity |
+| Risk Score | Numeric (0–100) | Model-derived customer risk score |
+| Risk Band | Categorical | Low, Medium, or High risk |
+| Default Probability | Numeric | Model-estimated probability of default |
+
+*Refer to `documentation/data_dictionary.md` for the detailed field definitions.*
+
+## 3. Project Objectives & Key Business Questions
+
+### Objectives
+- Build a governed relational database integrating customer, credit, application, and transaction data.
+- Analyze lending data to identify customer and application risk patterns.
+- Train and compare classification models for loan-default prediction.
+- Develop a 0–100 risk-scoring system and interactive decision-support dashboard.
+
+### Business Questions
+1. How can customer, credit, application, and transaction data be consolidated reliably?
+2. Which customer features help identify potential loan defaults?
+3. How accurately can machine learning classify default risk?
+4. How can predicted default probability be translated into an understandable risk score?
+5. Which customers fall into Low, Medium, and High risk categories?
+6. How can underwriters use risk insights to prioritize application reviews?
+
+## 4. Methodology & Analytical Workflow
+
+| Stage | Work Performed | Tools |
+|---|---|---|
+| Data Integration | Loaded four datasets and validated relational integrity | Python, Pandas, SQLite |
+| Database Design | Created relational schema with primary and foreign key constraints | SQL, PostgreSQL |
+| Data Analysis | Performed EDA and executed 10 analytical SQL queries | SQL, Pandas |
+| Feature Engineering | Aggregated transactions, created financial ratios, and controlled data leakage | Python, NumPy |
+| Model Development | Trained and compared four classification algorithms | Scikit-learn, XGBoost |
+| Risk Scoring | Converted predicted default probability into a 0–100 score and risk category | Python |
+| Dashboard | Built an 8-component interactive BI dashboard | Streamlit, Plotly |
+
+### Model Performance
+
+Four classifiers were evaluated: Logistic Regression, Decision Tree, Random Forest, and XGBoost.
+
+| Metric | Champion Model |
+|---|---:|
+| Algorithm | Logistic Regression |
+| ROC-AUC | **0.704** |
+| Recall | **0.648** |
+
+**Model selection note:** Logistic Regression was selected as the champion model. Its performance falls short of the PRD targets of 0.80 ROC-AUC and 0.70 recall. The model card documents the comparison and improvement opportunities.
+
+## 5. Dashboard Preview & Visual Highlights
+
+The Streamlit dashboard includes **8 components** designed to present lending performance, customer risk, and model outputs.
+
+### Dashboard Overview
+![Dashboard Overview](assets/dashboard_overview.png)
+
+*Overview of lending data, portfolio metrics, and risk distribution.*
+
+### Customer Risk Analysis
+![Customer Risk Analysis](assets/customer_risk_analysis.png)
+
+*Customer risk scores and Low, Medium, and High risk segments.*
+
+### Model Performance
+![Model Performance](assets/model_performance.png)
+
+*Classification model evaluation and performance comparison.*
+
+> Replace the image paths with your actual dashboard screenshots before publishing.
+
+## 6. Key Insights & Findings
+
+- **Data integrity:** Successfully loaded **5,000 customers, 5,000 bureau records, 7,500 applications, and 40,079 transactions**, with **zero orphan foreign keys**.
+- **Model performance:** Logistic Regression achieved **0.704 ROC-AUC** and **0.648 recall** on the held-out test set.
+- **Model comparison:** Four classifiers were evaluated to select the champion model rather than relying on a single algorithm.
+- **Customer risk assessment:** Every customer with an application receives a **0–100 risk score** and a Low, Medium, or High risk classification.
+- **Analytical coverage:** Developed **10 SQL analytical queries** to support credit risk and lending analysis.
+- **Decision support:** Combined database, predictive modeling, risk scoring, and dashboard outputs into one reproducible workflow.
+
+## 7. Actionable Business Recommendations
+
+| Business Need | Recommendation | Expected Value |
+|---|---|---|
+| High-risk applications | Prioritize High-risk cases for additional underwriter review | Focus review effort on potentially riskier applications |
+| Consistent risk assessment | Use the 0–100 score alongside existing underwriting checks | Support more consistent application reviews |
+| Model improvement | Investigate additional features and improve model performance against PRD targets | Improve default-risk identification |
+| Data reliability | Maintain database constraints and integrity validation during data loading | Reduce inconsistent or disconnected records |
+| Responsible lending | Keep final approval decisions with human underwriters | Avoid fully automated lending decisions |
+
+*These are operational recommendations. No realized reduction in defaults, financial savings, or approval improvement has been measured in this project.*
+
+## 8. Repository Structure & How to Run
+
+```text
 credit-risk-loan-analytics/
-├── datasets/                      # raw CSVs (customers, credit_history, loan_applications, transactions)
+│
+├── datasets/                     # Raw lending CSV datasets
+│
 ├── sql/
-│   └── credit_risk_platform.sql   # production DDL (PostgreSQL) + 10 analytical queries
+│   └── credit_risk_platform.sql  # PostgreSQL schema + 10 SQL queries
+│
 ├── notebooks/
-│   ├── 01_eda.ipynb                # portfolio profiling + the 10 SQL queries, run and interpreted
+│   ├── 01_eda.ipynb
 │   ├── 02_feature_engineering.ipynb
 │   ├── 03_modeling.ipynb
 │   └── 04_risk_scoring.ipynb
+│
 ├── src/
-│   ├── data_load.py                # CSV -> governed DB, with integrity validation
-│   ├── features.py                 # transaction aggregation, ratios, leakage control
-│   ├── train.py                    # trains + compares 4 classifiers, selects champion
-│   └── risk_score.py               # probability -> 0-100 score -> Low/Med/High
+│   ├── data_load.py
+│   ├── features.py
+│   ├── train.py
+│   └── risk_score.py
+│
 ├── models/
-│   ├── default_model.pkl           # persisted champion model + preprocessing
+│   ├── default_model.pkl
 │   ├── feature_importance.csv
 │   ├── metrics_report.json
 │   ├── scored_customers.csv
 │   └── model_card.md
+│
 ├── dashboard/
-│   └── app.py                      # Streamlit BI dashboard, all 8 required component
+│   └── app.py
+│
 ├── documentation/
 │   ├── PRD.docx
 │   └── data_dictionary.md
+│
 ├── requirements.txt
 └── README.md
-```
-
-## Quickstart
-
-```bash
-git clone https://github.com/<your-username>/credit-risk-loan-analytics.git
-cd credit-risk-loan-analytics
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-
-# 1. Build the governed database from the raw CSVs
-python src/data_load.py
-
-# 2. Train and compare all 4 classifiers, persist the champion
-python src/train.py
-
-# 3. Score every customer 0-100 and bucket into risk categories
-python src/risk_score.py
-
-# 4. Launch the dashboard
-streamlit run dashboard/app.py
-```
-
-Fixed random seeds (`random_state=42`) throughout — re-running the pipeline reproduces the
-reported metrics exactly.
-
-The default engine is **SQLite** (`data/credit_risk.db`) for zero-setup, portable local
-development. `sql/credit_risk_platform.sql` targets **PostgreSQL 14+** for a production
-deployment — same schema, same constraints; only the load path differs (`\copy` in psql vs.
-`src/data_load.py`'s `pandas.to_sql`).
-
-## Notebooks vs. src/
-
-The four notebooks are the narrative — read them in order for the analysis story (EDA →
-features → modelling → scoring), each with charts and commentary. They call into `src/` for
-the actual logic, so the notebooks and the CLI pipeline (`python src/train.py`, etc.) always
-agree — there's exactly one implementation of each step, not two.
-
-## Known limitations
-
-- ROC-AUC (0.704) and recall (0.648) fall short of the PRD's 0.80 / 0.70 targets — discussed
-  in full in the model card, along with what would close the gap.
-- Synthetic dataset; a fictional lending business. The methodology, not the absolute
-  metrics, is the deliverable.
-- No production API, MLOps pipeline, automated pricing, or fairness/bias review — explicitly
-  out of scope for v1 (see PRD §3, non-goals).
-
-## Tech stack
-
-PostgreSQL (production) / SQLite (dev) · Python 3.10+ · pandas, NumPy · scikit-learn, XGBoost
-· SHAP · matplotlib, Seaborn · Streamlit + Plotly · Jupyter · Git
-
-## License
-
-Internal project for the Internmo Applied Data Science internship track. Not for production
-lending use.
